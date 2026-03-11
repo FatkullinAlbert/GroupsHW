@@ -1,0 +1,75 @@
+---
+- name: Настройка PAM и Docker
+  hosts: pam
+  become: yes
+  vars_files:
+    - vars/main.yml
+
+  tasks:
+    - name: Создание пользователей otus и otusadm
+      user:
+        name: "{{ item }}"
+        password: "{{ 'Otus2022!' | password_hash('sha512') }}"
+        shell: /bin/bash
+        groups: "{{ 'admin' if item == 'otusadm' else '' }}"
+        append: yes
+      loop:
+        - otus
+        - otusadm
+        
+    - name: Создание группы admin
+      group:
+        name: admin
+        state: present
+
+    - name: Добавление root и vagrant в группу admin
+      user:
+        name: "{{ item }}"
+        groups: admin
+        append: yes
+      loop:
+        - root
+        - vagrant
+
+    - name: Копирование скрипта проверки доступа
+      copy:
+        src: files/login.sh
+        dest: /usr/local/bin/login.sh
+        mode: 0755
+
+    - name: Копирование файла с праздниками
+      copy:
+        src: files/holidays.conf
+        dest: /usr/local/etc/holidays.conf
+        mode: 0644
+
+    - name: Настройка PAM для sshd (добавление pam_exec)
+      lineinfile:
+        path: /etc/pam.d/sshd
+        insertafter: '^auth\s+include\s+postlogin'
+        line: 'auth required pam_exec.so debug /usr/local/bin/login.sh'
+        state: present
+
+    - name: Установка Docker
+      apt:
+        name:
+          - docker.io
+          - docker-compose
+        state: present
+        update_cache: yes
+
+    - name: Создание пользователя dockeruser
+      user:
+        name: dockeruser
+        password: "{{ 'Docker2024!' | password_hash('sha512') }}"
+        groups: docker
+        append: yes
+        shell: /bin/bash
+
+    - name: Настройка sudo для управления docker сервисом
+      copy:
+        content: |
+          dockeruser ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart docker
+        dest: /etc/sudoers.d/dockeruser
+        mode: 0440
+        validate: 'visudo -cf %s'
